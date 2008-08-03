@@ -1,4 +1,5 @@
 require 'net/http'
+require 'net/https'
 require 'pathname'
 
 # Copyright (c) 2008 Caio Chassot
@@ -47,9 +48,10 @@ module RailzScout
   mattr_accessor :sections
   @@sections = %w[ request session environment backtrace ]
 
-  def create_bug_form_data(bug_params)
+  def create_bug_form_data(bug_params, sep = '&')
     bug = config.merge(bug_params)
-    { :ScoutUserName    => bug[:username],
+    params = { 
+      :ScoutUserName    => bug[:username],
       :ScoutProject     => bug[:project],
       :ScoutArea        => bug[:area],
       :Description      => bug[:title],
@@ -58,11 +60,13 @@ module RailzScout
       :ForceNewBug      => (bug[:force_new] ? 1 : 0),
       :FriendlyResponse => 0, # 1 to response in HTML, 0 as XML
     }
+    # create a url encoded data string
+    params.map {|k,v| "#{urlencode(k.to_s)}=#{urlencode(v.to_s)}" }.join(sep)
   end
   
   def submit_bug(exception, controller, request, data={})
     bug_params = {}
-    bug_params[:title] = "#{controller.controller_name}##{controller.action_name} (#{exception.class}) #{exception.message.inspect}"
+    bug_params[:title] = build_title(exception, controller)
     bug_params[:body]  = render(data.merge({
       :rails_root => rails_root, 
       :controller => controller, 
@@ -73,8 +77,13 @@ module RailzScout
       :data       => data,
       :sections   => sections }))
     
-    response = Net::HTTP.post_form(URI.parse(config[:url]), create_bug_form_data(bug_params))
-    raise "RailzScout post to FogBugz failed: #{response.body}" unless response.body =~ /<Success>/
+    uri = URI.parse(config[:url])
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true if uri.scheme == "https"  # enable SSL/TLS
+    http.start do
+      response = http.request_post(uri.path, create_bug_form_data(bug_params))
+      raise "RailzScout post to FogBugz failed: #{response.body}" unless response.body =~ /<Success>/      
+    end
   end
   
   def render(assigns)
@@ -99,5 +108,19 @@ module RailzScout
   def rails_root
     @rails_root ||= Pathname.new(RAILS_ROOT).cleanpath.to_s
   end
+  
+  def urlencode(str)
+    str.gsub(/[^a-zA-Z0-9_\.\-]/n) {|s| sprintf('%%%02x', s[0]) }
+  end
+  
+  def build_title(exception, controller)
+    "#{controller.controller_name}##{controller.action_name} (#{exception.class}) #{remove_object_id(exception.message.inspect)}"
+  end
+  
+  # Removes the object id so cases will be seen as the same issue
+  # So #<AuthController:0x24cdb94> becomes #<AuthController>
+  def remove_object_id(message)
+    message.gsub(/:0x[a-z0-9]{7}/, '')
+  end 
 
 end
