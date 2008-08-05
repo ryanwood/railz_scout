@@ -67,6 +67,8 @@ module RailzScout
   def submit_bug(exception, controller, request, data={})
     bug_params = {}
     bug_params[:title] = build_title(exception, controller)
+    logger.debug bug_params[:title]
+    return
     bug_params[:body]  = render(data.merge({
       :rails_root => rails_root, 
       :controller => controller, 
@@ -114,7 +116,16 @@ module RailzScout
   end
   
   def build_title(exception, controller)
-    "#{controller.controller_name}##{controller.action_name} (#{exception.class}) #{remove_object_id(exception.message.inspect)}"
+    file, line, method = ''
+    app_root = Regexp.new( RAILS_ROOT )
+    filtered = exception.backtrace.select{ |line| line =~ app_root }
+    unless filtered.empty?
+      file, line, method = filtered[0].gsub( RAILS_ROOT, '' ).split(':')
+      method.gsub!("in `", '').gsub!("'", '')
+      "#{file}:#{line} in #{method} (#{exception.class}) from #{controller.controller_name}##{controller.action_name}"
+    else
+      "(#{exception.class}) from #{controller.controller_name}##{controller.action_name}"
+    end
   end
   
   # Removes the object id so cases will be seen as the same issue
