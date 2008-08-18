@@ -67,8 +67,6 @@ module RailzScout
   def submit_bug(exception, controller, request, data={})
     bug_params = {}
     bug_params[:title] = build_title(exception, controller)
-    logger.debug bug_params[:title]
-    return
     bug_params[:body]  = render(data.merge({
       :rails_root => rails_root, 
       :controller => controller, 
